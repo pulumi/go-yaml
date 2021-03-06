@@ -187,13 +187,7 @@ func (p *parser) parseBlockMapping(ctx *context) (*ast.MappingNode, error) {
 	}
 	node := ast.Mapping(start.GetToken(), false, start)
 
-	for {
-		ntk := ctx.nextNotCommentToken()
-		antk := ctx.afterNextNotCommentToken()
-		if antk == nil || antk.Type != token.MappingValueType || ntk.Position.Column != node.GetToken().Position.Column {
-			return node, nil
-		}
-
+	for p.continueMapping(ctx, node) {
 		ctx.progressIgnoreComment(1)
 
 		value, err := p.parseMappingValue(ctx)
@@ -202,6 +196,13 @@ func (p *parser) parseBlockMapping(ctx *context) (*ast.MappingNode, error) {
 		}
 		node.Values = append(node.Values, value)
 	}
+	return node, nil
+}
+
+func (p *parser) continueMapping(ctx *context, node *ast.MappingNode) bool {
+	ntk := ctx.nextNotCommentToken()
+	antk := ctx.afterNextNotCommentToken()
+	return antk != nil && antk.Type == token.MappingValueType && ntk.Position.Column == node.GetToken().Position.Column
 }
 
 func (p *parser) parseMappingValue(ctx *context) (*ast.MappingValueNode, error) {
