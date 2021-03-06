@@ -505,7 +505,6 @@ func (p *parser) parseToken(ctx *context, tk *token.Token) (ast.Node, error) {
 	switch tk.Type {
 	case token.CommentType:
 		comment, err := p.parseComment(ctx)
-		p.parseComment(ctx)
 		if err != nil {
 			return nil, err
 		}
