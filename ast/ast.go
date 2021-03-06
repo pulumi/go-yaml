@@ -1564,6 +1564,9 @@ type Visitor interface {
 // Walk is invoked recursively with visitor w for each of the non-nil children of node,
 // followed by a call of w.Visit(nil).
 func Walk(v Visitor, node Node) {
+	if node == nil {
+		return
+	}
 	if v = v.Visit(node); v == nil {
 		return
 	}

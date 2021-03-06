@@ -186,6 +186,10 @@ func (p *parser) validateMapValue(ctx *context, key, value ast.Node) error {
 }
 
 func (p *parser) parseMappingValue(ctx *context) (ast.Node, error) {
+	var keyToken *token.Token
+	var mvnode *ast.MappingValueNode
+
+	tk := ctx.currentToken()
 	key, err := p.parseMapKey(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse map key")
@@ -193,11 +197,7 @@ func (p *parser) parseMappingValue(ctx *context) (ast.Node, error) {
 	if err := p.validateMapKey(key.GetToken()); err != nil {
 		return nil, errors.Wrapf(err, "validate mapping key error")
 	}
-	ctx.progress(1)          // progress to mapping value token
-	tk := ctx.currentToken() // get mapping value token
-	if tk == nil {
-		return nil, errors.ErrSyntax("unexpected map", key.GetToken())
-	}
+	ctx.progress(1) // progress to mapping value token
 	ctx.progress(1) // progress to value token
 	if err := p.setSameLineCommentIfExists(ctx, key); err != nil {
 		return nil, errors.Wrapf(err, "failed to set same line comment to node")
@@ -216,13 +216,14 @@ func (p *parser) parseMappingValue(ctx *context) (ast.Node, error) {
 		return nil, errors.Wrapf(err, "failed to validate map value")
 	}
 
-	mvnode := ast.MappingValue(tk, key, value)
-	node := ast.Mapping(tk, false, mvnode)
+	keyToken = key.GetToken()
+	mvnode = ast.MappingValue(keyToken, key, value)
+	node := ast.Mapping(keyToken, false, mvnode)
 
 	ntk := ctx.nextNotCommentToken()
 	antk := ctx.afterNextNotCommentToken()
 	for antk != nil && antk.Type == token.MappingValueType &&
-		ntk.Position.Column == key.GetToken().Position.Column {
+		ntk.Position.Column == keyToken.Position.Column {
 		ctx.progressIgnoreComment(1)
 		value, err := p.parseToken(ctx, ctx.currentToken())
 		if err != nil {
