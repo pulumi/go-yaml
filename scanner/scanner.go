@@ -168,7 +168,7 @@ func (s *Scanner) isChangedToIndentStateEqual() bool {
 
 func (s *Scanner) breakLiteral(ctx *Context) {
 	s.docStartColumn = 0
-	ctx.breakLiteral()
+	ctx.breakScalar()
 }
 
 func (s *Scanner) scanSingleQuote(ctx *Context) (tk *token.Token, pos int) {
@@ -394,7 +394,7 @@ func (s *Scanner) scanComment(ctx *Context) (tk *token.Token, pos int) {
 	return
 }
 
-func (s *Scanner) scanLiteral(ctx *Context, c rune) {
+func (s *Scanner) scanScalar(ctx *Context, c rune) {
 	ctx.addOriginBuf(c)
 	if ctx.isEOS() {
 		if ctx.isLiteral {
@@ -424,7 +424,7 @@ func (s *Scanner) scanLiteral(ctx *Context, c rune) {
 		s.progressColumn(ctx, 1)
 	}
 }
-func (s *Scanner) scanLiteralHeader(ctx *Context) (pos int, err error) {
+func (s *Scanner) scanScalarHeader(ctx *Context) (pos int, err error) {
 	header := ctx.currentChar()
 	ctx.addOriginBuf(header)
 	ctx.progress(1) // skip '|' or '>' character
@@ -497,7 +497,7 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 				ctx.addBufferedTokenIfExists()
 				s.breakLiteral(ctx)
 			} else {
-				s.scanLiteral(ctx, c)
+				s.scanScalar(ctx, c)
 				continue
 			}
 		} else if s.isChangedToIndentStateDown() {
@@ -615,7 +615,7 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 			}
 		case '|', '>':
 			if !ctx.existsBuffer() {
-				progress, err := s.scanLiteralHeader(ctx)
+				progress, err := s.scanScalarHeader(ctx)
 				if err != nil {
 					// TODO: returns syntax error object
 					return
@@ -718,7 +718,7 @@ func (s *Scanner) Init(text string) {
 	s.sourcePos = 0
 	s.line = 1
 	s.column = 1
-	s.offset = 1
+	s.offset = 0
 	s.prevIndentLevel = 0
 	s.prevIndentNum = 0
 	s.prevIndentColumn = 0
