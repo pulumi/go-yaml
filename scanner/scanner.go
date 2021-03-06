@@ -463,11 +463,7 @@ func (s *Scanner) scanNewLine(ctx *Context, c rune) {
 	// ---
 	// a:[space][space]
 	//   b: c
-	removedNum := ctx.removeRightSpaceFromBuf()
-	if removedNum > 0 {
-		s.column -= removedNum
-		s.offset -= removedNum
-	}
+	ctx.removeRightSpaceFromBuf()
 
 	if ctx.isEOS() {
 		ctx.addBufferedTokenIfExists()
