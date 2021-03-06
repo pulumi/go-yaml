@@ -41,7 +41,6 @@ type Scanner struct {
 	startedFlowSequenceNum int
 	startedFlowMapNum      int
 	indentState            IndentState
-	savedPos               *token.Position
 }
 
 func (s *Scanner) pos() *token.Position {
@@ -52,22 +51,6 @@ func (s *Scanner) pos() *token.Position {
 		IndentNum:   s.indentNum,
 		IndentLevel: s.indentLevel,
 	}
-}
-
-func (s *Scanner) bufferedToken(ctx *Context) *token.Token {
-	if s.savedPos != nil {
-		tk := ctx.bufferedToken(s.savedPos)
-		s.savedPos = nil
-		return tk
-	}
-	size := len(ctx.buf)
-	return ctx.bufferedToken(&token.Position{
-		Line:        s.line,
-		Column:      s.column - size,
-		Offset:      s.offset - size,
-		IndentNum:   s.indentNum,
-		IndentLevel: s.indentLevel,
-	})
 }
 
 func (s *Scanner) progressColumn(ctx *Context, num int) {
@@ -181,10 +164,6 @@ func (s *Scanner) isChangedToIndentStateUp() bool {
 
 func (s *Scanner) isChangedToIndentStateEqual() bool {
 	return s.indentState == IndentStateEqual
-}
-
-func (s *Scanner) addBufferedTokenIfExists(ctx *Context) {
-	ctx.addToken(s.bufferedToken(ctx))
 }
 
 func (s *Scanner) breakLiteral(ctx *Context) {
@@ -419,7 +398,7 @@ func (s *Scanner) scanLiteral(ctx *Context, c rune) {
 	ctx.addOriginBuf(c)
 	if ctx.isEOS() {
 		if ctx.isLiteral {
-			ctx.addBuf(c)
+			ctx.addBuf(c, s.pos())
 		}
 		value := ctx.bufferedSrc()
 		ctx.addToken(token.String(string(value), string(ctx.obuf), s.pos()))
@@ -427,25 +406,24 @@ func (s *Scanner) scanLiteral(ctx *Context, c rune) {
 		s.progressColumn(ctx, 1)
 	} else if s.isNewLineChar(c) {
 		if ctx.isLiteral {
-			ctx.addBuf(c)
+			ctx.addBuf(c, s.pos())
 		} else {
-			ctx.addBuf(' ')
+			ctx.addBuf(' ', s.pos())
 		}
 		s.progressLine(ctx)
 	} else if s.isFirstCharAtLine && c == ' ' {
 		if 0 < s.docStartColumn && s.docStartColumn <= s.column {
-			ctx.addBuf(c)
+			ctx.addBuf(c, s.pos())
 		}
 		s.progressColumn(ctx, 1)
 	} else {
 		if s.docStartColumn == 0 {
 			s.docStartColumn = s.column
 		}
-		ctx.addBuf(c)
+		ctx.addBuf(c, s.pos())
 		s.progressColumn(ctx, 1)
 	}
 }
-
 func (s *Scanner) scanLiteralHeader(ctx *Context) (pos int, err error) {
 	header := ctx.currentChar()
 	ctx.addOriginBuf(header)
@@ -480,11 +458,6 @@ func (s *Scanner) scanLiteralHeader(ctx *Context) (pos int, err error) {
 }
 
 func (s *Scanner) scanNewLine(ctx *Context, c rune) {
-	if len(ctx.buf) > 0 && s.savedPos == nil {
-		s.savedPos = s.pos()
-		s.savedPos.Column -= len(ctx.bufferedSrc())
-	}
-
 	// if the following case, origin buffer has unnecessary two spaces.
 	// So, `removeRightSpaceFromOriginBuf` remove them, also fix column number too.
 	// ---
@@ -494,17 +467,14 @@ func (s *Scanner) scanNewLine(ctx *Context, c rune) {
 	if removedNum > 0 {
 		s.column -= removedNum
 		s.offset -= removedNum
-		if s.savedPos != nil {
-			s.savedPos.Column -= removedNum
-		}
 	}
 
 	if ctx.isEOS() {
-		s.addBufferedTokenIfExists(ctx)
+		ctx.addBufferedTokenIfExists()
 	} else if s.isAnchor {
-		s.addBufferedTokenIfExists(ctx)
+		ctx.addBufferedTokenIfExists()
 	}
-	ctx.addBuf(' ')
+	ctx.addBuf(' ', s.pos())
 	ctx.addOriginBuf(c)
 	ctx.isSingleLine = false
 	s.progressLine(ctx)
@@ -518,19 +488,19 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 		if ctx.isDocument() {
 			if s.isChangedToIndentStateEqual() ||
 				s.isChangedToIndentStateDown() {
-				s.addBufferedTokenIfExists(ctx)
+				ctx.addBufferedTokenIfExists()
 				s.breakLiteral(ctx)
 			} else {
 				s.scanLiteral(ctx, c)
 				continue
 			}
 		} else if s.isChangedToIndentStateDown() {
-			s.addBufferedTokenIfExists(ctx)
+			ctx.addBufferedTokenIfExists()
 		} else if s.isChangedToIndentStateEqual() {
 			// if first character is new line character, buffer expect to raw folded literal
 			if len(ctx.obuf) > 0 && s.newLineCount(ctx.obuf) <= 1 {
 				// doesn't raw folded literal
-				s.addBufferedTokenIfExists(ctx)
+				ctx.addBufferedTokenIfExists()
 			}
 		}
 		switch c {
@@ -544,7 +514,7 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 			}
 		case '}':
 			if !ctx.existsBuffer() || s.startedFlowMapNum > 0 {
-				ctx.addToken(s.bufferedToken(ctx))
+				ctx.addToken(ctx.bufferedToken())
 				ctx.addOriginBuf(c)
 				ctx.addToken(token.MappingEnd(string(ctx.obuf), s.pos()))
 				s.startedFlowMapNum--
@@ -568,7 +538,7 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 			}
 		case '-':
 			if s.indentNum == 0 && s.column == 1 && ctx.repeatNum('-') == 3 {
-				s.addBufferedTokenIfExists(ctx)
+				ctx.addBufferedTokenIfExists()
 				ctx.addToken(token.DocumentHeader(string(ctx.obuf)+"---", s.pos()))
 				s.progressColumn(ctx, 3)
 				pos += 2
@@ -577,21 +547,21 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 			if ctx.existsBuffer() && s.isChangedToIndentStateUp() {
 				// raw folded
 				ctx.isRawFolded = true
-				ctx.addBuf(c)
+				ctx.addBuf(c, s.pos())
 				ctx.addOriginBuf(c)
 				s.progressColumn(ctx, 1)
 				continue
 			}
 			if ctx.existsBuffer() {
 				// '-' is literal
-				ctx.addBuf(c)
+				ctx.addBuf(c, s.pos())
 				ctx.addOriginBuf(c)
 				s.progressColumn(ctx, 1)
 				continue
 			}
 			nc := ctx.nextChar()
 			if nc == ' ' || s.isNewLineChar(nc) {
-				s.addBufferedTokenIfExists(ctx)
+				ctx.addBufferedTokenIfExists()
 				ctx.addOriginBuf(c)
 				tk := token.SequenceEntry(string(ctx.obuf), s.pos())
 				s.prevIndentColumn = tk.Position.Column
@@ -609,7 +579,7 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 			}
 		case ']':
 			if !ctx.existsBuffer() || s.startedFlowSequenceNum > 0 {
-				s.addBufferedTokenIfExists(ctx)
+				ctx.addBufferedTokenIfExists()
 				ctx.addOriginBuf(c)
 				ctx.addToken(token.SequenceEnd(string(ctx.obuf), s.pos()))
 				s.startedFlowSequenceNum--
@@ -618,7 +588,7 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 			}
 		case ',':
 			if s.startedFlowSequenceNum > 0 || s.startedFlowMapNum > 0 {
-				s.addBufferedTokenIfExists(ctx)
+				ctx.addBufferedTokenIfExists()
 				ctx.addOriginBuf(c)
 				ctx.addToken(token.CollectEntry(string(ctx.obuf), s.pos()))
 				s.progressColumn(ctx, 1)
@@ -628,7 +598,7 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 			nc := ctx.nextChar()
 			if s.startedFlowMapNum > 0 || nc == ' ' || s.isNewLineChar(nc) || ctx.isNextEOS() {
 				// mapping value
-				tk := s.bufferedToken(ctx)
+				tk := ctx.bufferedToken()
 				if tk != nil {
 					s.prevIndentColumn = tk.Position.Column
 					ctx.addToken(tk)
@@ -674,7 +644,7 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 			}
 		case '&':
 			if !ctx.existsBuffer() {
-				s.addBufferedTokenIfExists(ctx)
+				ctx.addBufferedTokenIfExists()
 				ctx.addOriginBuf(c)
 				ctx.addToken(token.Anchor(string(ctx.obuf), s.pos()))
 				s.progressColumn(ctx, 1)
@@ -683,7 +653,7 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 			}
 		case '*':
 			if !ctx.existsBuffer() {
-				s.addBufferedTokenIfExists(ctx)
+				ctx.addBufferedTokenIfExists()
 				ctx.addOriginBuf(c)
 				ctx.addToken(token.Alias(string(ctx.obuf), s.pos()))
 				s.progressColumn(ctx, 1)
@@ -691,7 +661,7 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 			}
 		case '#':
 			if !ctx.existsBuffer() || ctx.previousChar() == ' ' {
-				s.addBufferedTokenIfExists(ctx)
+				ctx.addBufferedTokenIfExists()
 				token, progress := s.scanComment(ctx)
 				ctx.addToken(token)
 				s.progressColumn(ctx, progress)
@@ -721,7 +691,7 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 			continue
 		case ' ':
 			if ctx.isSaveIndentMode() || (!s.isAnchor && !s.isFirstCharAtLine) {
-				ctx.addBuf(c)
+				ctx.addBuf(c, s.pos())
 				ctx.addOriginBuf(c)
 				s.progressColumn(ctx, 1)
 				continue
@@ -731,16 +701,16 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 				ctx.addOriginBuf(c)
 				continue
 			}
-			s.addBufferedTokenIfExists(ctx)
+			ctx.addBufferedTokenIfExists()
 			pos-- // to rescan white space at next scanning for adding white space to next buffer.
 			s.isAnchor = false
 			return
 		}
-		ctx.addBuf(c)
+		ctx.addBuf(c, s.pos())
 		ctx.addOriginBuf(c)
 		s.progressColumn(ctx, 1)
 	}
-	s.addBufferedTokenIfExists(ctx)
+	ctx.addBufferedTokenIfExists()
 	return
 }
 
