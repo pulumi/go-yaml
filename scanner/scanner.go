@@ -73,7 +73,7 @@ func (s *Scanner) isNeededKeepPreviousIndentNum(ctx *Context, c rune) bool {
 	if !s.isChangedToIndentStateUp() {
 		return false
 	}
-	if ctx.isDocument() {
+	if ctx.isBlockScalar() {
 		return true
 	}
 	if c == '-' && ctx.existsBuffer() {
@@ -111,7 +111,7 @@ func (s *Scanner) newLineCount(src []rune) int {
 }
 
 func (s *Scanner) updateIndent(ctx *Context, c rune) {
-	if s.isFirstCharAtLine && s.isNewLineChar(c) && ctx.isDocument() {
+	if s.isFirstCharAtLine && s.isNewLineChar(c) && ctx.isBlockScalar() {
 		return
 	}
 	if s.isFirstCharAtLine && c == ' ' {
@@ -491,7 +491,7 @@ func (s *Scanner) scan(ctx *Context) (pos int) {
 		pos = ctx.nextPos()
 		c := ctx.currentChar()
 		s.updateIndent(ctx, c)
-		if ctx.isDocument() {
+		if ctx.isBlockScalar() {
 			if s.isChangedToIndentStateEqual() ||
 				s.isChangedToIndentStateDown() {
 				ctx.addBufferedTokenIfExists()
