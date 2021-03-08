@@ -1032,6 +1032,9 @@ func (n *MappingNode) blockStyleString() string {
 		return "{}"
 	}
 	values := []string{}
+	if n.GetComment() != nil {
+		values = append(values, strings.TrimSuffix(n.Comment.Value, "\n"))
+	}
 	for _, value := range n.Values {
 		values = append(values, value.String())
 	}
@@ -1155,7 +1158,14 @@ func (n *MappingValueNode) String() string {
 	keyIndentLevel := n.Key.GetToken().Position.IndentLevel
 	valueIndentLevel := n.Value.GetToken().Position.IndentLevel
 	if _, ok := n.Value.(ScalarNode); ok {
-		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
+		var leadingComment, comment string
+		if n.GetComment() != nil {
+			leadingComment = fmt.Sprintf("%s%s", space, n.Comment.Value)
+		}
+		if n.Value.GetComment() != nil {
+			comment = fmt.Sprintf(" #%s", n.Value.GetComment().Value)
+		}
+		return fmt.Sprintf("%s%s%s: %s%s", leadingComment, space, n.Key.String(), n.Value.String(), comment)
 	} else if keyIndentLevel < valueIndentLevel {
 		return fmt.Sprintf("%s%s:\n%s", space, n.Key.String(), n.Value.String())
 	} else if m, ok := n.Value.(*MappingNode); ok && (m.IsFlowStyle || len(m.Values) == 0) {
@@ -1544,7 +1554,7 @@ func (n *CommentNode) AddColumn(col int) {
 
 // String comment to text
 func (n *CommentNode) String() string {
-	return n.Comment.Value
+	return strings.TrimSuffix(n.Comment.Value, "\n")
 }
 
 // MarshalYAML encodes to a YAML text
