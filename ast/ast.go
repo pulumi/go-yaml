@@ -1318,7 +1318,11 @@ func (n *SequenceNode) blockStyleString() string {
 			newValues = append(newValues, fmt.Sprintf("%s  %s", space, trimmed))
 		}
 		newValue := strings.Join(newValues, "\n")
-		values = append(values, fmt.Sprintf("%s- %s", space, newValue))
+		var comment string
+		if value.GetComment() != nil {
+			comment = fmt.Sprintf(" #%s", value.GetComment().Value)
+		}
+		values = append(values, fmt.Sprintf("%s- %s%s", space, newValue, comment))
 	}
 	return strings.Join(values, "\n")
 }
