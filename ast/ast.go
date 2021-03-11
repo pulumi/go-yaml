@@ -1302,6 +1302,10 @@ func (n *SequenceNode) flowStyleString() string {
 func (n *SequenceNode) blockStyleString() string {
 	space := strings.Repeat(" ", n.Start.Position.Column-1)
 	values := []string{}
+	if n.GetComment() != nil {
+		leadingComment := fmt.Sprintf("%s", strings.TrimSuffix(n.Comment.Value, "\n"))
+		values = append(values, leadingComment)
+	}
 	for _, value := range n.Values {
 		valueStr := value.String()
 		splittedValues := strings.Split(valueStr, "\n")
