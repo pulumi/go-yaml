@@ -1033,7 +1033,8 @@ func (n *MappingNode) blockStyleString() string {
 	}
 	values := []string{}
 	if n.GetComment() != nil {
-		values = append(values, strings.TrimSuffix(n.Comment.Value, "\n"))
+		space := strings.Repeat(" ", n.Comment.Position.Column-1)
+		values = append(values, strings.TrimSuffix(fmt.Sprintf("%s%s", space, n.Comment.Value), "\n"))
 	}
 	for _, value := range n.Values {
 		values = append(values, value.String())
