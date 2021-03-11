@@ -386,6 +386,16 @@ func (s *Scanner) scanComment(ctx *Context) (tk *token.Token, pos int) {
 				continue
 			}
 			value := ctx.source(ctx.idx, ctx.idx+idx)
+
+			// Skip \n for comments leading first token.
+			// --
+			// config:
+			//   # Leading comment
+			//   foo: bar
+			if len(ctx.tokens) == 0 && len(ctx.obuf) > 1 && ctx.obuf[0] == '\n' {
+				ctx.obuf = ctx.obuf[1:]
+			}
+
 			tk = token.Comment(value, string(ctx.obuf), s.pos())
 			pos = len([]rune(value)) + 1
 			return
