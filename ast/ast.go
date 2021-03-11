@@ -1452,7 +1452,11 @@ func (n *AliasNode) AddColumn(col int) {
 
 // String alias to text
 func (n *AliasNode) String() string {
-	return fmt.Sprintf("*%s", n.Value.String())
+	var comment string
+	if n.Value.GetComment() != nil {
+		comment = fmt.Sprintf(" #%s", n.Value.GetComment().Value)
+	}
+	return fmt.Sprintf("%s%s%s", n.Start.Value, n.Value.String(), comment)
 }
 
 // MarshalYAML encodes to a YAML text
