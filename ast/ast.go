@@ -1158,11 +1158,13 @@ func (n *MappingValueNode) String() string {
 	space := strings.Repeat(" ", n.Key.GetToken().Position.Column-1)
 	keyIndentLevel := n.Key.GetToken().Position.IndentLevel
 	valueIndentLevel := n.Value.GetToken().Position.IndentLevel
+
+	var leadingComment, comment string
+	if n.GetComment() != nil {
+		leadingComment = fmt.Sprintf("%s", n.Comment.Value)
+	}
+
 	if _, ok := n.Value.(ScalarNode); ok {
-		var leadingComment, comment string
-		if n.GetComment() != nil {
-			leadingComment = fmt.Sprintf("%s%s", space, n.Comment.Value)
-		}
 		if n.Value.GetComment() != nil {
 			comment = fmt.Sprintf(" #%s", n.Value.GetComment().Value)
 		}
@@ -1170,13 +1172,13 @@ func (n *MappingValueNode) String() string {
 	} else if keyIndentLevel < valueIndentLevel {
 		return fmt.Sprintf("%s%s:\n%s", space, n.Key.String(), n.Value.String())
 	} else if m, ok := n.Value.(*MappingNode); ok && (m.IsFlowStyle || len(m.Values) == 0) {
-		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
+		return fmt.Sprintf("%s%s%s: %s", leadingComment, space, n.Key.String(), n.Value.String())
 	} else if s, ok := n.Value.(*SequenceNode); ok && (s.IsFlowStyle || len(s.Values) == 0) {
-		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
+		return fmt.Sprintf("%s%s%s: %s", leadingComment, space, n.Key.String(), n.Value.String())
 	} else if _, ok := n.Value.(*AnchorNode); ok {
-		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
+		return fmt.Sprintf("%s%s%s: %s", leadingComment, space, n.Key.String(), n.Value.String())
 	} else if _, ok := n.Value.(*AliasNode); ok {
-		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
+		return fmt.Sprintf("%s%s%s: %s", leadingComment, space, n.Key.String(), n.Value.String())
 	}
 	return fmt.Sprintf("%s%s:\n%s", space, n.Key.String(), n.Value.String())
 }
@@ -1294,6 +1296,10 @@ func (n *SequenceNode) AddColumn(col int) {
 
 func (n *SequenceNode) flowStyleString() string {
 	values := []string{}
+	if n.GetComment() != nil {
+		leadingComment := fmt.Sprintf("%s", strings.TrimSuffix(n.Comment.Value, "\n"))
+		values = append(values, leadingComment)
+	}
 	for _, value := range n.Values {
 		values = append(values, value.String())
 	}
