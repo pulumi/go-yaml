@@ -1,6 +1,7 @@
 MIT License
 
 Copyright (c) 2021 Pulumi
+Copyright (c) 2019 Masaaki Goshima
 
 Copyright for portions of project pulumi/go-yaml are held by [Masaaki Goshima, 2019] as part of project goccy/go-yaml. 
 All other copyright for project pulumi/go-yaml are held by [Pulumi, 2021].
