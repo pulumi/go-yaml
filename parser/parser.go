@@ -9,11 +9,12 @@ import (
 	"github.com/pulumi/go-yaml/internal/errors"
 	"github.com/pulumi/go-yaml/lexer"
 	"github.com/pulumi/go-yaml/token"
+	"golang.org/x/xerrors"
 )
 
 type parser struct{}
 
-func (p *parser) parseFlowMapping(ctx *context) (ast.Node, error) {
+func (p *parser) parseMapping(ctx *context) (ast.Node, error) {
 	node := ast.Mapping(ctx.currentToken(), true)
 	ctx.progress(1) // skip MappingStart token
 	for ctx.next() {
@@ -30,7 +31,11 @@ func (p *parser) parseFlowMapping(ctx *context) (ast.Node, error) {
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to parse mapping value in mapping node")
 		}
-		node.Values = append(node.Values, value)
+		mvnode, ok := value.(*ast.MappingValueNode)
+		if !ok {
+			return nil, errors.ErrSyntax("failed to parse flow mapping node", value.GetToken())
+		}
+		node.Values = append(node.Values, mvnode)
 		ctx.progress(1)
 	}
 	return node, nil
@@ -70,7 +75,7 @@ func (p *parser) parseTag(ctx *context) (ast.Node, error) {
 	switch token.ReservedTagKeyword(tagToken.Value) {
 	case token.MappingTag,
 		token.OrderedMapTag:
-		value, err = p.parseFlowMapping(ctx)
+		value, err = p.parseMapping(ctx)
 	case token.IntegerTag,
 		token.FloatTag,
 		token.StringTag,
@@ -180,41 +185,7 @@ func (p *parser) validateMapValue(ctx *context, key, value ast.Node) error {
 	return nil
 }
 
-func (p *parser) parseBlockMapping(ctx *context) (*ast.MappingNode, error) {
-	start, err := p.parseMappingValue(ctx)
-	if err != nil {
-		return nil, err
-	}
-	node := ast.Mapping(start.GetToken(), false, start)
-
-	for p.continueMapping(ctx, node) {
-		ctx.progressIgnoreComment(1)
-
-		value, err := p.parseMappingValue(ctx)
-		if err != nil {
-			return nil, err
-		}
-		node.Values = append(node.Values, value)
-	}
-	return node, nil
-}
-
-func (p *parser) continueMapping(ctx *context, node *ast.MappingNode) bool {
-	ntk := ctx.nextNotCommentToken()
-	antk := ctx.afterNextNotCommentToken()
-	return antk != nil && antk.Type == token.MappingValueType && ntk.Position.Column == node.GetToken().Position.Column
-}
-
-func (p *parser) parseMappingValue(ctx *context) (*ast.MappingValueNode, error) {
-	var comment *ast.CommentNode
-	if ctx.currentToken().Type == token.CommentType {
-		c, err := p.parseComment(ctx)
-		if err != nil {
-			return nil, err
-		}
-		comment = c
-	}
-
+func (p *parser) parseMappingValue(ctx *context) (ast.Node, error) {
 	key, err := p.parseMapKey(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse map key")
@@ -222,9 +193,12 @@ func (p *parser) parseMappingValue(ctx *context) (*ast.MappingValueNode, error) 
 	if err := p.validateMapKey(key.GetToken()); err != nil {
 		return nil, errors.Wrapf(err, "validate mapping key error")
 	}
-	ctx.progress(1)             // progress to mapping value token
-	colon := ctx.currentToken() // fetch the colon token
-	ctx.progress(1)             // progress to value token
+	ctx.progress(1)          // progress to mapping value token
+	tk := ctx.currentToken() // get mapping value token
+	if tk == nil {
+		return nil, errors.ErrSyntax("unexpected map", key.GetToken())
+	}
+	ctx.progress(1) // progress to value token
 	if err := p.setSameLineCommentIfExists(ctx, key); err != nil {
 		return nil, errors.Wrapf(err, "failed to set same line comment to node")
 	}
@@ -234,7 +208,7 @@ func (p *parser) parseMappingValue(ctx *context) (*ast.MappingValueNode, error) 
 		ctx.progressIgnoreComment(1)
 	}
 
-	value, err := p.parseMapValue(ctx, key, colon)
+	value, err := p.parseMapValue(ctx, key, tk)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse map value")
 	}
@@ -242,11 +216,42 @@ func (p *parser) parseMappingValue(ctx *context) (*ast.MappingValueNode, error) 
 		return nil, errors.Wrapf(err, "failed to validate map value")
 	}
 
-	mv := ast.MappingValue(key.GetToken(), key, value)
-	if comment != nil {
-		mv.SetComment(comment.GetToken())
+	mvnode := ast.MappingValue(tk, key, value)
+	node := ast.Mapping(tk, false, mvnode)
+
+	ntk := ctx.nextNotCommentToken()
+	antk := ctx.afterNextNotCommentToken()
+	for antk != nil && antk.Type == token.MappingValueType &&
+		ntk.Position.Column == key.GetToken().Position.Column {
+		ctx.progressIgnoreComment(1)
+		value, err := p.parseToken(ctx, ctx.currentToken())
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse mapping node")
+		}
+		switch value.Type() {
+		case ast.MappingType:
+			c := value.(*ast.MappingNode)
+			comment := c.GetComment()
+			for idx, v := range c.Values {
+				if idx == 0 && comment != nil {
+					if err := v.SetComment(comment); err != nil {
+						return nil, errors.Wrapf(err, "failed to set comment token to node")
+					}
+				}
+				node.Values = append(node.Values, v)
+			}
+		case ast.MappingValueType:
+			node.Values = append(node.Values, value.(*ast.MappingValueNode))
+		default:
+			return nil, xerrors.Errorf("failed to parse mapping value node node is %s", value.Type())
+		}
+		ntk = ctx.nextNotCommentToken()
+		antk = ctx.afterNextNotCommentToken()
 	}
-	return mv, nil
+	if len(node.Values) == 1 {
+		return mvnode, nil
+	}
+	return node, nil
 }
 
 func (p *parser) parseSequenceEntry(ctx *context) (ast.Node, error) {
@@ -451,7 +456,7 @@ func (p *parser) parseDocument(ctx *context) (*ast.DocumentNode, error) {
 	return node, nil
 }
 
-func (p *parser) parseComment(ctx *context) (*ast.CommentNode, error) {
+func (p *parser) parseComment(ctx *context) (ast.Node, error) {
 	commentTokens := []*token.Token{}
 	for {
 		tk := ctx.currentToken()
@@ -474,7 +479,17 @@ func (p *parser) parseComment(ctx *context) (*ast.CommentNode, error) {
 	}
 	firstToken.Value = strings.Join(values, "")
 	firstToken.Value = strings.Join(origins, "")
-	return ast.Comment(firstToken), nil
+	node, err := p.parseToken(ctx, ctx.currentToken())
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to parse node after comment")
+	}
+	if node == nil {
+		return ast.Comment(firstToken), nil
+	}
+	if err := node.SetComment(firstToken); err != nil {
+		return nil, errors.Wrapf(err, "failed to set comment token to node")
+	}
+	return node, nil
 }
 
 func (p *parser) parseMappingKey(ctx *context) (ast.Node, error) {
@@ -493,7 +508,8 @@ func (p *parser) parseToken(ctx *context, tk *token.Token) (ast.Node, error) {
 		return nil, nil
 	}
 	if tk.NextType() == token.MappingValueType {
-		return p.parseBlockMapping(ctx)
+		node, err := p.parseMappingValue(ctx)
+		return node, err
 	}
 	node, err := p.parseScalarValueWithComment(ctx, tk)
 	if err != nil {
@@ -504,27 +520,13 @@ func (p *parser) parseToken(ctx *context, tk *token.Token) (ast.Node, error) {
 	}
 	switch tk.Type {
 	case token.CommentType:
-		comment, err := p.parseComment(ctx)
-		if err != nil {
-			return nil, err
-		}
-		node, err := p.parseToken(ctx, ctx.currentToken())
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to parse node after comment")
-		}
-		if node == nil {
-			return comment, nil
-		}
-		if err := node.SetComment(comment.GetComment()); err != nil {
-			return nil, errors.Wrapf(err, "failed to set comment token to node")
-		}
-		return node, nil
+		return p.parseComment(ctx)
 	case token.MappingKeyType:
 		return p.parseMappingKey(ctx)
 	case token.DocumentHeaderType:
 		return p.parseDocument(ctx)
 	case token.MappingStartType:
-		return p.parseFlowMapping(ctx)
+		return p.parseMapping(ctx)
 	case token.SequenceStartType:
 		return p.parseSequence(ctx)
 	case token.SequenceEntryType:

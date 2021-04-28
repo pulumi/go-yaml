@@ -13,7 +13,6 @@ type Context struct {
 	notSpaceCharPos    int
 	notSpaceOrgCharPos int
 	src                []rune
-	bufPos             *token.Position
 	buf                []rune
 	obuf               []rune
 	tokens             token.Tokens
@@ -60,7 +59,6 @@ func (c *Context) reset(src []rune) {
 }
 
 func (c *Context) resetBuffer() {
-	c.bufPos = nil
 	c.buf = c.buf[:0]
 	c.obuf = c.obuf[:0]
 	c.notSpaceCharPos = 0
@@ -71,7 +69,7 @@ func (c *Context) isSaveIndentMode() bool {
 	return c.isLiteral || c.isFolded || c.isRawFolded
 }
 
-func (c *Context) breakScalar() {
+func (c *Context) breakLiteral() {
 	c.isLiteral = false
 	c.isRawFolded = false
 	c.isFolded = false
@@ -85,12 +83,9 @@ func (c *Context) addToken(tk *token.Token) {
 	c.tokens = append(c.tokens, tk)
 }
 
-func (c *Context) addBuf(r rune, pos *token.Position) {
-	if len(c.buf) == 0 {
-		if r == ' ' {
-			return
-		}
-		c.bufPos = pos
+func (c *Context) addBuf(r rune) {
+	if len(c.buf) == 0 && r == ' ' {
+		return
 	}
 	c.buf = append(c.buf, r)
 	if r != ' ' && r != '\t' {
@@ -105,12 +100,6 @@ func (c *Context) addOriginBuf(r rune) {
 	}
 }
 
-func (c *Context) appendOriginBuf(runes ...rune) {
-	for _, r := range runes {
-		c.addOriginBuf(r)
-	}
-}
-
 func (c *Context) removeRightSpaceFromBuf() int {
 	trimmedBuf := c.obuf[:c.notSpaceOrgCharPos]
 	buflen := len(trimmedBuf)
@@ -122,7 +111,7 @@ func (c *Context) removeRightSpaceFromBuf() int {
 	return diff
 }
 
-func (c *Context) isBlockScalar() bool {
+func (c *Context) isDocument() bool {
 	return c.isLiteral || c.isFolded || c.isRawFolded
 }
 
@@ -186,14 +175,14 @@ func (c *Context) existsBuffer() bool {
 
 func (c *Context) bufferedSrc() []rune {
 	src := c.buf[:c.notSpaceCharPos]
-	if len(src) > 0 && src[len(src)-1] == '\n' && c.isBlockScalar() && c.literalOpt == "-" {
+	if len(src) > 0 && src[len(src)-1] == '\n' && c.isDocument() && c.literalOpt == "-" {
 		// remove end '\n' character
 		src = src[:len(src)-1]
 	}
 	return src
 }
 
-func (c *Context) bufferedToken() *token.Token {
+func (c *Context) bufferedToken(pos *token.Position) *token.Token {
 	if c.idx == 0 {
 		return nil
 	}
@@ -202,15 +191,11 @@ func (c *Context) bufferedToken() *token.Token {
 		return nil
 	}
 	var tk *token.Token
-	if c.isBlockScalar() {
-		tk = token.String(string(source), string(c.obuf), c.bufPos)
+	if c.isDocument() {
+		tk = token.String(string(source), string(c.obuf), pos)
 	} else {
-		tk = token.New(string(source), string(c.obuf), c.bufPos)
+		tk = token.New(string(source), string(c.obuf), pos)
 	}
 	c.resetBuffer()
 	return tk
-}
-
-func (c *Context) addBufferedTokenIfExists() {
-	c.addToken(c.bufferedToken())
 }

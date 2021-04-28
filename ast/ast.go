@@ -1032,10 +1032,6 @@ func (n *MappingNode) blockStyleString() string {
 		return "{}"
 	}
 	values := []string{}
-	if n.GetComment() != nil {
-		space := strings.Repeat(" ", n.Comment.Position.Column-1)
-		values = append(values, strings.TrimSuffix(fmt.Sprintf("%s%s", space, n.Comment.Value), "\n"))
-	}
 	for _, value := range n.Values {
 		values = append(values, value.String())
 	}
@@ -1158,27 +1154,18 @@ func (n *MappingValueNode) String() string {
 	space := strings.Repeat(" ", n.Key.GetToken().Position.Column-1)
 	keyIndentLevel := n.Key.GetToken().Position.IndentLevel
 	valueIndentLevel := n.Value.GetToken().Position.IndentLevel
-
-	var leadingComment, comment string
-	if n.GetComment() != nil {
-		leadingComment = fmt.Sprintf("%s", n.Comment.Value)
-	}
-
 	if _, ok := n.Value.(ScalarNode); ok {
-		if n.Value.GetComment() != nil {
-			comment = fmt.Sprintf(" #%s", n.Value.GetComment().Value)
-		}
-		return fmt.Sprintf("%s%s%s: %s%s", leadingComment, space, n.Key.String(), n.Value.String(), comment)
+		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
 	} else if keyIndentLevel < valueIndentLevel {
 		return fmt.Sprintf("%s%s:\n%s", space, n.Key.String(), n.Value.String())
 	} else if m, ok := n.Value.(*MappingNode); ok && (m.IsFlowStyle || len(m.Values) == 0) {
-		return fmt.Sprintf("%s%s%s: %s", leadingComment, space, n.Key.String(), n.Value.String())
+		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
 	} else if s, ok := n.Value.(*SequenceNode); ok && (s.IsFlowStyle || len(s.Values) == 0) {
-		return fmt.Sprintf("%s%s%s: %s", leadingComment, space, n.Key.String(), n.Value.String())
+		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
 	} else if _, ok := n.Value.(*AnchorNode); ok {
-		return fmt.Sprintf("%s%s%s: %s", leadingComment, space, n.Key.String(), n.Value.String())
+		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
 	} else if _, ok := n.Value.(*AliasNode); ok {
-		return fmt.Sprintf("%s%s%s: %s", leadingComment, space, n.Key.String(), n.Value.String())
+		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
 	}
 	return fmt.Sprintf("%s%s:\n%s", space, n.Key.String(), n.Value.String())
 }
@@ -1296,10 +1283,6 @@ func (n *SequenceNode) AddColumn(col int) {
 
 func (n *SequenceNode) flowStyleString() string {
 	values := []string{}
-	if n.GetComment() != nil {
-		leadingComment := fmt.Sprintf("%s", strings.TrimSuffix(n.Comment.Value, "\n"))
-		values = append(values, leadingComment)
-	}
 	for _, value := range n.Values {
 		values = append(values, value.String())
 	}
@@ -1309,10 +1292,6 @@ func (n *SequenceNode) flowStyleString() string {
 func (n *SequenceNode) blockStyleString() string {
 	space := strings.Repeat(" ", n.Start.Position.Column-1)
 	values := []string{}
-	if n.GetComment() != nil {
-		leadingComment := fmt.Sprintf("%s", strings.TrimSuffix(n.Comment.Value, "\n"))
-		values = append(values, leadingComment)
-	}
 	for _, value := range n.Values {
 		valueStr := value.String()
 		splittedValues := strings.Split(valueStr, "\n")
@@ -1329,11 +1308,7 @@ func (n *SequenceNode) blockStyleString() string {
 			newValues = append(newValues, fmt.Sprintf("%s  %s", space, trimmed))
 		}
 		newValue := strings.Join(newValues, "\n")
-		var comment string
-		if value.GetComment() != nil {
-			comment = fmt.Sprintf(" #%s", value.GetComment().Value)
-		}
-		values = append(values, fmt.Sprintf("%s- %s%s", space, newValue, comment))
+		values = append(values, fmt.Sprintf("%s- %s", space, newValue))
 	}
 	return strings.Join(values, "\n")
 }
@@ -1463,11 +1438,7 @@ func (n *AliasNode) AddColumn(col int) {
 
 // String alias to text
 func (n *AliasNode) String() string {
-	var comment string
-	if n.Value.GetComment() != nil {
-		comment = fmt.Sprintf(" #%s", n.Value.GetComment().Value)
-	}
-	return fmt.Sprintf("%s%s%s", n.Start.Value, n.Value.String(), comment)
+	return fmt.Sprintf("*%s", n.Value.String())
 }
 
 // MarshalYAML encodes to a YAML text
@@ -1573,7 +1544,7 @@ func (n *CommentNode) AddColumn(col int) {
 
 // String comment to text
 func (n *CommentNode) String() string {
-	return strings.TrimSuffix(n.Comment.Value, "\n")
+	return n.Comment.Value
 }
 
 // MarshalYAML encodes to a YAML text
@@ -1593,9 +1564,6 @@ type Visitor interface {
 // Walk is invoked recursively with visitor w for each of the non-nil children of node,
 // followed by a call of w.Visit(nil).
 func Walk(v Visitor, node Node) {
-	if node == nil {
-		return
-	}
 	if v = v.Visit(node); v == nil {
 		return
 	}
