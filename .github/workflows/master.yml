@@ -1,26 +1,33 @@
 on:
   push:
     branches:
-      [ "master", "feature/**", "feature-**" ]
+["master", "feature/**", "feature-**"]
     paths-ignore:
       - 'CHANGELOG.md'
       - 'CHANGELOG_PENDING.md'
       - 'README.md'
 
 env:
-  PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_PROD_ACCESS_TOKEN }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PULUMI_TEST_OWNER: "moolumi"
+  ESC_ACTION_OIDC_AUTH: true
+  ESC_ACTION_OIDC_ORGANIZATION: pulumi
+  ESC_ACTION_OIDC_REQUESTED_TOKEN_TYPE: urn:pulumi:token-type:access_token:organization
+  ESC_ACTION_ENVIRONMENT: imports/github-secrets
+  ESC_ACTION_EXPORT_ENVIRONMENT_VARIABLES: PULUMI_ACCESS_TOKEN=PULUMI_PROD_ACCESS_TOKEN
 
 jobs:
   build-and-test:
     name: Build & Test
     strategy:
       matrix:
-        platform: [ ubuntu-latest ]
+        platform: [ubuntu-latest]
         go-version: [1.16.x]
     runs-on: ${{ matrix.platform }}
     steps:
+      - name: Fetch secrets from ESC
+        id: esc-secrets
+        uses: pulumi/esc-action@v1
       - name: Set up Go ${{ matrix.go-version }}
         uses: actions/setup-go@v1
         with:
@@ -48,3 +55,4 @@ jobs:
           make test
         env:
           PULUMI_ROOT: ${{ runner.temp }}/opt/pulumi
+permissions: write-all # Equivalent to default permissions plus id-token: write
