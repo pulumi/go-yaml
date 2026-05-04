@@ -865,6 +865,14 @@ func (s *Scanner) scanMultiLine(ctx *Context, c rune) error {
 			s.progressColumn(ctx, 1)
 			return ErrInvalidToken(invalidTk)
 		}
+		// Capture the position of the first non-indent content character so
+		// the resulting String token points at the value content rather than
+		// at a synthesized end-of-content position. updateIndentColumn sets
+		// firstLineIndentColumn the first time it is called; checking it
+		// here distinguishes "first content char" from later content chars.
+		if state.firstLineIndentColumn == 0 && s.savedPos == nil {
+			s.savedPos = s.pos()
+		}
 		state.updateIndentColumn(s.column)
 		if err := state.validateIndentColumn(); err != nil {
 			invalidTk := token.Invalid(err.Error(), string(ctx.obuf), s.pos())
