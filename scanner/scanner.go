@@ -72,7 +72,12 @@ func (s *Scanner) bufferedToken(ctx *Context) *token.Token {
 		return tk
 	}
 	line := s.line
+	// Column counts runes (one per character); buf is rune-typed.
 	column := s.column - len(ctx.buf)
+	// Offset counts bytes; the buf's source byte length is the sum of each
+	// rune's UTF-8 width. For ASCII buf == len(buf); for multi-byte content
+	// they diverge.
+	bufBytes := bufByteLen(ctx.buf)
 	level := s.indentLevel
 	if ctx.isMultiLine() {
 		line -= s.newLineCount(ctx.buf)
@@ -87,10 +92,25 @@ func (s *Scanner) bufferedToken(ctx *Context) *token.Token {
 	return ctx.bufferedToken(&token.Position{
 		Line:        line,
 		Column:      column,
-		Offset:      s.offset - len(ctx.buf),
+		Offset:      s.offset - bufBytes,
 		IndentNum:   s.indentNum,
 		IndentLevel: level,
 	})
+}
+
+// bufByteLen returns the source byte length corresponding to a buffered
+// rune slice, on the assumption that each buffered rune came from one
+// rune of source -- true for plain scalars and for the unescaped portion
+// of quoted scalars. Quoted-scalar escape sequences (e.g. `\n` -> '\n')
+// expand a multi-byte source sequence to one buf rune; for those tokens
+// the position is captured up front (srcpos in scanQuote) and this
+// function is not consulted.
+func bufByteLen(buf []rune) int {
+	n := 0
+	for _, r := range buf {
+		n += utf8.RuneLen(r)
+	}
+	return n
 }
 
 // progressColumn advances by `num` runes. Column increments by rune count;
@@ -891,10 +911,10 @@ func (s *Scanner) scanMultiLine(ctx *Context, c rune) error {
 
 func (s *Scanner) scanNewLine(ctx *Context, c rune) {
 	if len(ctx.buf) > 0 && s.savedPos == nil {
-		bufLen := len(ctx.bufferedSrc())
+		buffered := ctx.bufferedSrc()
 		s.savedPos = s.pos()
-		s.savedPos.Column -= bufLen
-		s.savedPos.Offset -= bufLen
+		s.savedPos.Column -= len(buffered)
+		s.savedPos.Offset -= bufByteLen(buffered)
 	}
 
 	// if the following case, origin buffer has unnecessary two spaces.
