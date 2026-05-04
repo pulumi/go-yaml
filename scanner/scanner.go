@@ -66,8 +66,15 @@ func (s *Scanner) pos() *token.Position {
 }
 
 func (s *Scanner) bufferedToken(ctx *Context) *token.Token {
+	// Capture content length BEFORE bufferedToken resets the buffer.
+	contentRunes := len(ctx.bufferedSrc())
+	contentBytes := bufByteLen(ctx.bufferedSrc())
+
 	if s.savedPos != nil {
 		tk := ctx.bufferedToken(s.savedPos)
+		if tk != nil {
+			tk.End = endPosFromStart(tk.Position, contentRunes, contentBytes)
+		}
 		s.savedPos = nil
 		return tk
 	}
@@ -89,13 +96,31 @@ func (s *Scanner) bufferedToken(ctx *Context) *token.Token {
 			level = last.Position.IndentLevel + 1
 		}
 	}
-	return ctx.bufferedToken(&token.Position{
+	startPos := &token.Position{
 		Line:        line,
 		Column:      column,
 		Offset:      s.offset - bufBytes,
 		IndentNum:   s.indentNum,
 		IndentLevel: level,
-	})
+	}
+	tk := ctx.bufferedToken(startPos)
+	if tk != nil {
+		tk.End = endPosFromStart(startPos, contentRunes, contentBytes)
+	}
+	return tk
+}
+
+// endPosFromStart returns the end position of a token whose start is `start`
+// and whose source content spans `runes` runes / `bytes` bytes. End is
+// exclusive: it points at the byte just past the last meaningful byte.
+func endPosFromStart(start *token.Position, runes, bytes int) *token.Position {
+	return &token.Position{
+		Line:        start.Line,
+		Column:      start.Column + runes,
+		Offset:      start.Offset + bytes,
+		IndentNum:   start.IndentNum,
+		IndentLevel: start.IndentLevel,
+	}
 }
 
 // bufByteLen returns the source byte length corresponding to a buffered
@@ -321,7 +346,9 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (*token.Token, error) {
 			continue
 		}
 		s.progressColumn(ctx, 1)
-		return token.SingleQuote(string(value), string(ctx.obuf), srcpos), nil
+		tk := token.SingleQuote(string(value), string(ctx.obuf), srcpos)
+		tk.End = s.pos()
+		return tk, nil
 	}
 	s.progressColumn(ctx, 1)
 	return nil, ErrInvalidToken(
@@ -629,7 +656,9 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 			continue
 		}
 		s.progressColumn(ctx, 1)
-		return token.DoubleQuote(string(value), string(ctx.obuf), srcpos), nil
+		tk := token.DoubleQuote(string(value), string(ctx.obuf), srcpos)
+		tk.End = s.pos()
+		return tk, nil
 	}
 	s.progressColumn(ctx, 1)
 	return nil, ErrInvalidToken(
@@ -750,15 +779,19 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 		case ' ':
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
-			ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
+			tk := token.Tag(value, string(ctx.obuf), s.pos())
 			s.progressColumn(ctx, len([]rune(value)))
+			tk.End = s.pos()
+			ctx.addToken(tk)
 			ctx.clear()
 			return true, nil
 		case ',':
 			if s.startedFlowSequenceNum > 0 || s.startedFlowMapNum > 0 {
 				value := ctx.source(ctx.idx-1, ctx.idx+idx)
-				ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
+				tk := token.Tag(value, string(ctx.obuf), s.pos())
 				s.progressColumn(ctx, len([]rune(value))-1) // progress column before collect-entry for scanning it at scanFlowEntry function.
+				tk.End = s.pos()
+				ctx.addToken(tk)
 				ctx.clear()
 				return true, nil
 			} else {
@@ -767,8 +800,10 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 		case '\n', '\r':
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
-			ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
+			tk := token.Tag(value, string(ctx.obuf), s.pos())
 			s.progressColumn(ctx, len([]rune(value))-1) // progress column before new-line-char for scanning new-line-char at scanNewLine function.
+			tk.End = s.pos()
+			ctx.addToken(tk)
 			ctx.clear()
 			return true, nil
 		case '{', '}':
@@ -829,17 +864,21 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 		progress := len([]rune(value))
 		tk := token.Comment(value, string(ctx.obuf), s.pos())
 		tk.LeadingSpace = leadingSpace
-		ctx.addToken(tk)
 		s.progressColumn(ctx, progress)
+		tk.End = s.pos()
+		ctx.addToken(tk)
 		s.progressLine(ctx)
 		ctx.clear()
 		return true
 	}
 	// document ends with comment.
 	value := string(ctx.src[ctx.idx:])
-	ctx.addToken(token.Comment(value, string(ctx.obuf), s.pos()))
+	tk := token.Comment(value, string(ctx.obuf), s.pos())
+	tk.LeadingSpace = leadingSpace
 	progress := len([]rune(value))
 	s.progressColumn(ctx, progress)
+	tk.End = s.pos()
+	ctx.addToken(tk)
 	s.progressLine(ctx)
 	ctx.clear()
 	return true
@@ -1080,19 +1119,20 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	}
 
 	// mapping value
-	tk := s.bufferedToken(ctx)
-	if tk != nil {
-		s.lastDelimColumn = tk.Position.Column
-		ctx.addToken(tk)
-	} else if tk := ctx.lastToken(); tk != nil {
+	if buffered := s.bufferedToken(ctx); buffered != nil {
+		s.lastDelimColumn = buffered.Position.Column
+		ctx.addToken(buffered)
+	} else if last := ctx.lastToken(); last != nil {
 		// If the map key is quote, the buffer does not exist because it has already been cut into tokens.
 		// Therefore, we need to check the last token.
-		if tk.Indicator == token.QuotedScalarIndicator {
-			s.lastDelimColumn = tk.Position.Column
+		if last.Indicator == token.QuotedScalarIndicator {
+			s.lastDelimColumn = last.Position.Column
 		}
 	}
-	ctx.addToken(token.MappingValue(s.pos()))
+	mvTk := token.MappingValue(s.pos())
 	s.progressColumn(ctx, 1)
+	mvTk.End = s.pos()
+	ctx.addToken(mvTk)
 	ctx.clear()
 	return true, nil
 }
@@ -1115,8 +1155,10 @@ func (s *Scanner) scanDocumentStart(ctx *Context) bool {
 	}
 
 	s.addBufferedTokenIfExists(ctx)
-	ctx.addToken(token.DocumentHeader(string(ctx.obuf)+"---", s.pos()))
+	tk := token.DocumentHeader(string(ctx.obuf)+"---", s.pos())
 	s.progressColumn(ctx, 3)
+	tk.End = s.pos()
+	ctx.addToken(tk)
 	ctx.clear()
 	s.clearState()
 	return true
@@ -1134,8 +1176,10 @@ func (s *Scanner) scanDocumentEnd(ctx *Context) bool {
 	}
 
 	s.addBufferedTokenIfExists(ctx)
-	ctx.addToken(token.DocumentEnd(string(ctx.obuf)+"...", s.pos()))
+	tk := token.DocumentEnd(string(ctx.obuf)+"...", s.pos())
 	s.progressColumn(ctx, 3)
+	tk.End = s.pos()
+	ctx.addToken(tk)
 	ctx.clear()
 	return true
 }
@@ -1146,8 +1190,10 @@ func (s *Scanner) scanMergeKey(ctx *Context) bool {
 	}
 
 	s.lastDelimColumn = s.column
-	ctx.addToken(token.MergeKey(string(ctx.obuf)+"<<", s.pos()))
+	tk := token.MergeKey(string(ctx.obuf)+"<<", s.pos())
 	s.progressColumn(ctx, 2)
+	tk.End = s.pos()
+	ctx.addToken(tk)
 	ctx.clear()
 	return true
 }
@@ -1187,8 +1233,9 @@ func (s *Scanner) scanSequence(ctx *Context) (bool, error) {
 	ctx.addOriginBuf('-')
 	tk := token.SequenceEntry(string(ctx.obuf), s.pos())
 	s.lastDelimColumn = tk.Position.Column
-	ctx.addToken(tk)
 	s.progressColumn(ctx, 1)
+	tk.End = s.pos()
+	ctx.addToken(tk)
 	ctx.clear()
 	return true, nil
 }
@@ -1286,10 +1333,16 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	}
 	switch header {
 	case '|':
-		ctx.addToken(token.Literal("|"+opt, headerBuf, s.pos()))
+		tk := token.Literal("|"+opt, headerBuf, s.pos())
+		// Indicator span: `|` plus any options like `|+1`. Width = 1 +
+		// len(opt) bytes / 1 + utf8.RuneCountInString(opt) runes.
+		tk.End = endPosFromStart(tk.Position, 1+utf8.RuneCountInString(opt), 1+len(opt))
+		ctx.addToken(tk)
 		ctx.setLiteral(s.lastDelimColumn, opt)
 	case '>':
-		ctx.addToken(token.Folded(">"+opt, headerBuf, s.pos()))
+		tk := token.Folded(">"+opt, headerBuf, s.pos())
+		tk.End = endPosFromStart(tk.Position, 1+utf8.RuneCountInString(opt), 1+len(opt))
+		ctx.addToken(tk)
 		ctx.setFolded(s.lastDelimColumn, opt)
 	}
 	if commentIndex > 0 {
@@ -1316,8 +1369,9 @@ func (s *Scanner) scanMapKey(ctx *Context) bool {
 
 	tk := token.MappingKey(s.pos())
 	s.lastDelimColumn = tk.Position.Column
-	ctx.addToken(tk)
 	s.progressColumn(ctx, 1)
+	tk.End = s.pos()
+	ctx.addToken(tk)
 	ctx.clear()
 	return true
 }
@@ -1346,8 +1400,10 @@ func (s *Scanner) scanAnchor(ctx *Context) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('&')
-	ctx.addToken(token.Anchor(string(ctx.obuf), s.pos()))
+	tk := token.Anchor(string(ctx.obuf), s.pos())
 	s.progressColumn(ctx, 1)
+	tk.End = s.pos()
+	ctx.addToken(tk)
 	s.isAnchor = true
 	ctx.clear()
 	return true
@@ -1360,8 +1416,10 @@ func (s *Scanner) scanAlias(ctx *Context) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('*')
-	ctx.addToken(token.Alias(string(ctx.obuf), s.pos()))
+	tk := token.Alias(string(ctx.obuf), s.pos())
 	s.progressColumn(ctx, 1)
+	tk.End = s.pos()
+	ctx.addToken(tk)
 	s.isAlias = true
 	ctx.clear()
 	return true

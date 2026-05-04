@@ -792,8 +792,15 @@ type Token struct {
 	LeadingSpace string
 	// Error keeps error message for InvalidToken.
 	Error string
-	// Position is a token position.
+	// Position is the token's start position.
 	Position *Position
+	// End is the token's end position: the byte offset just past the last
+	// byte of the token's source content. End.Offset - Position.Offset is
+	// the source span length. For trailing-whitespace-eligible tokens
+	// (plain scalars), End points at the last meaningful byte's successor,
+	// not at the trailing whitespace. nil when not set (e.g. for tokens
+	// produced by older code paths that haven't been updated).
+	End *Position
 	// Next is a next token reference.
 	Next *Token
 	// Prev is a previous token reference.
