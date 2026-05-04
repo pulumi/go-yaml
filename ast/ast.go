@@ -220,7 +220,21 @@ type BaseNode struct {
 }
 
 func addCommentString(base string, node *CommentGroupNode) string {
-	return fmt.Sprintf("%s %s", base, node.String())
+	return base + inlineCommentSeparator(node) + node.String()
+}
+
+// inlineCommentSeparator returns the original whitespace the scanner
+// captured between the preceding token and the comment's `#`, or a single
+// space if none was captured (the case for programmatically-constructed
+// AST nodes whose token has no LeadingSpace).
+func inlineCommentSeparator(node *CommentGroupNode) string {
+	if node == nil || len(node.Comments) == 0 || node.Comments[0].Token == nil {
+		return " "
+	}
+	if ls := node.Comments[0].Token.LeadingSpace; ls != "" {
+		return ls
+	}
+	return " "
 }
 
 func (n *BaseNode) readLen() int {
@@ -1461,9 +1475,10 @@ func (n *MappingValueNode) toString() string {
 		}
 		if keyComment != nil {
 			return fmt.Sprintf(
-				"%s%s: %s\n%s",
+				"%s%s:%s%s\n%s",
 				space,
 				n.Key.stringWithoutComment(),
+				inlineCommentSeparator(keyComment),
 				keyComment.String(),
 				valueStr,
 			)
@@ -1483,9 +1498,10 @@ func (n *MappingValueNode) toString() string {
 
 	if keyComment != nil {
 		return fmt.Sprintf(
-			"%s%s: %s\n%s",
+			"%s%s:%s%s\n%s",
 			space,
 			n.Key.stringWithoutComment(),
+			inlineCommentSeparator(keyComment),
 			keyComment.String(),
 			n.Value.String(),
 		)

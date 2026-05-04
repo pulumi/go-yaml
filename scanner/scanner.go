@@ -793,6 +793,26 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 		}
 	}
 
+	// Capture the original whitespace between the previous token and this
+	// `#`, so the ast emitter can preserve user spacing on inline comments
+	// instead of canonicalizing to a single space. Walk back through
+	// space/tab bytes; only treat them as inline-leading if a non-whitespace
+	// non-newline byte precedes them. (Standalone comments at line start
+	// are indented by the column tracker, not by these bytes.)
+	leadingSpace := ""
+	wsStart := ctx.idx
+	for wsStart > 0 {
+		c := ctx.src[wsStart-1]
+		if c == ' ' || c == '\t' {
+			wsStart--
+			continue
+		}
+		break
+	}
+	if wsStart < ctx.idx && wsStart > 0 && ctx.src[wsStart-1] != '\n' && ctx.src[wsStart-1] != '\r' {
+		leadingSpace = string(ctx.src[wsStart:ctx.idx])
+	}
+
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('#')
 	s.progress(ctx, 1) // skip '#' character
@@ -807,7 +827,9 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 		}
 		value := ctx.source(ctx.idx, ctx.idx+idx)
 		progress := len([]rune(value))
-		ctx.addToken(token.Comment(value, string(ctx.obuf), s.pos()))
+		tk := token.Comment(value, string(ctx.obuf), s.pos())
+		tk.LeadingSpace = leadingSpace
+		ctx.addToken(tk)
 		s.progressColumn(ctx, progress)
 		s.progressLine(ctx)
 		ctx.clear()

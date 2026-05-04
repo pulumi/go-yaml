@@ -786,6 +786,10 @@ type Token struct {
 	Value string
 	// Origin is a string that stores the original text as-is.
 	Origin string
+	// LeadingSpace, set on inline Comment tokens, holds the space/tab bytes
+	// the user wrote between the preceding token and the `#`. Empty for
+	// standalone comments and for tokens that don't track leading whitespace.
+	LeadingSpace string
 	// Error keeps error message for InvalidToken.
 	Error string
 	// Position is a token position.

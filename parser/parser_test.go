@@ -1623,11 +1623,11 @@ a:  #commentB
 `,
 			expected: `
 # commentA
-a: #commentB
+a:  #commentB
   # commentC
-  b: c # commentD
+  b: c  # commentD
   # commentE
-  d: e # commentF
+  d: e  # commentF
 # commentG
 `,
 		},
@@ -1646,13 +1646,13 @@ a: #commentB
 `,
 			expected: `
 # commentA
-- a # commentB
+- a  # commentB
 # commentC
-- b: # commentD
+- b:   # commentD
   # commentE
-  - d # commentF
+  - d  # commentF
   # commentG
-  - e # commentG
+  - e  # commentG
 # commentH
 `,
 		},
