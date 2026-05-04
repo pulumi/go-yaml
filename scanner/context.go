@@ -5,17 +5,21 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/token"
 )
 
-// Context context at scanning
+// Context context at scanning. The source `src` is stored as raw bytes so
+// that `idx` and `size` are byte offsets -- which is what every Go consumer
+// of token.Position.Offset expects. Decoded value buffers (`buf`, `obuf`)
+// stay rune-typed because they hold YAML scalar content, not source.
 type Context struct {
-	idx                int
-	size               int
+	idx                int    // byte index into src
+	size               int    // len(src) in bytes
 	notSpaceCharPos    int
 	notSpaceOrgCharPos int
-	src                []rune
+	src                []byte
 	buf                []rune
 	obuf               []rune
 	tokens             token.Tokens
@@ -50,7 +54,7 @@ func createContext() *Context {
 	}
 }
 
-func newContext(src []rune) *Context {
+func newContext(src []byte) *Context {
 	ctx, _ := ctxPool.Get().(*Context)
 	ctx.reset(src)
 	return ctx
@@ -65,7 +69,7 @@ func (c *Context) clear() {
 	c.mstate = nil
 }
 
-func (c *Context) reset(src []rune) {
+func (c *Context) reset(src []byte) {
 	c.idx = 0
 	c.size = len(src)
 	c.src = src
@@ -324,39 +328,74 @@ func (c *Context) source(s, e int) string {
 
 func (c *Context) previousChar() rune {
 	if c.idx > 0 {
-		return c.src[c.idx-1]
+		r, _ := utf8.DecodeLastRune(c.src[:c.idx])
+		return r
 	}
 	return rune(0)
 }
 
 func (c *Context) currentChar() rune {
 	if c.size > c.idx {
-		return c.src[c.idx]
+		r, _ := utf8.DecodeRune(c.src[c.idx:])
+		return r
 	}
 	return rune(0)
 }
 
+// currentCharSize returns the byte width of the rune at the current position.
+// Returns 0 at EOS.
+func (c *Context) currentCharSize() int {
+	if c.size > c.idx {
+		_, w := utf8.DecodeRune(c.src[c.idx:])
+		return w
+	}
+	return 0
+}
+
 func (c *Context) nextChar() rune {
-	if c.size > c.idx+1 {
-		return c.src[c.idx+1]
+	w := c.currentCharSize()
+	if w > 0 && c.size > c.idx+w {
+		r, _ := utf8.DecodeRune(c.src[c.idx+w:])
+		return r
+	}
+	return rune(0)
+}
+
+// charAt returns the rune at byte offset `at` (absolute, not relative).
+func (c *Context) charAt(at int) rune {
+	if at >= 0 && at < c.size {
+		r, _ := utf8.DecodeRune(c.src[at:])
+		return r
 	}
 	return rune(0)
 }
 
 func (c *Context) repeatNum(r rune) int {
 	cnt := 0
-	for i := c.idx; i < c.size; i++ {
-		if c.src[i] == r {
-			cnt++
-		} else {
+	for i := c.idx; i < c.size; {
+		got, w := utf8.DecodeRune(c.src[i:])
+		if got != r {
 			break
 		}
+		cnt++
+		i += w
 	}
 	return cnt
 }
 
-func (c *Context) progress(num int) {
-	c.idx += num
+// progress advances idx by `runes` runes and returns the total byte width consumed.
+// Callers wanting byte-accurate offset bookkeeping use the return value.
+func (c *Context) progress(runes int) int {
+	bytes := 0
+	for i := 0; i < runes && c.idx+bytes < c.size; i++ {
+		_, w := utf8.DecodeRune(c.src[c.idx+bytes:])
+		if w == 0 {
+			break
+		}
+		bytes += w
+	}
+	c.idx += bytes
+	return bytes
 }
 
 func (c *Context) existsBuffer() bool {
@@ -365,6 +404,13 @@ func (c *Context) existsBuffer() bool {
 
 func (c *Context) isMultiLine() bool {
 	return c.mstate != nil
+}
+
+func (c *Context) progressBytes(b int) {
+	// Direct byte-level advance, used by routines that already know exactly
+	// how many source bytes they consumed (e.g. scanText after a range over
+	// string(ctx.src[ctx.idx:])).
+	c.idx += b
 }
 
 func (c *Context) bufferedSrc() []rune {
